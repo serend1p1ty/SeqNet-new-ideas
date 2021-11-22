@@ -16,10 +16,10 @@ from models.resnet import build_resnet
 
 
 class SeqNet(nn.Module):
-    def __init__(self, cfg):
+    def __init__(self, args):
         super(SeqNet, self).__init__()
 
-        backbone, box_head = build_resnet(name="resnet50", pretrained=True)
+        backbone, box_head = build_resnet(name=args.backbone, pretrained=True)
 
         anchor_generator = AnchorGenerator(
             sizes=((32, 64, 128, 256, 512),), aspect_ratios=((0.5, 1.0, 2.0),)
@@ -29,21 +29,21 @@ class SeqNet(nn.Module):
             num_anchors=anchor_generator.num_anchors_per_location()[0],
         )
         pre_nms_top_n = dict(
-            training=cfg.MODEL.RPN.PRE_NMS_TOPN_TRAIN, testing=cfg.MODEL.RPN.PRE_NMS_TOPN_TEST
+            training=args.rpn_pre_nms_topn_train, testing=args.rpn_pre_nms_topn_test
         )
         post_nms_top_n = dict(
-            training=cfg.MODEL.RPN.POST_NMS_TOPN_TRAIN, testing=cfg.MODEL.RPN.POST_NMS_TOPN_TEST
+            training=args.rpn_post_nms_topn_train, testing=args.rpn_post_nms_topn_test
         )
         rpn = RegionProposalNetwork(
             anchor_generator=anchor_generator,
             head=head,
-            fg_iou_thresh=cfg.MODEL.RPN.POS_THRESH_TRAIN,
-            bg_iou_thresh=cfg.MODEL.RPN.NEG_THRESH_TRAIN,
-            batch_size_per_image=cfg.MODEL.RPN.BATCH_SIZE_TRAIN,
-            positive_fraction=cfg.MODEL.RPN.POS_FRAC_TRAIN,
+            fg_iou_thresh=args.rpn_pos_thresh_train,
+            bg_iou_thresh=args.rpn_neg_thresh_train,
+            batch_size_per_image=args.rpn_batchsize_train,
+            positive_fraction=args.rpn_pos_frac_train,
             pre_nms_top_n=pre_nms_top_n,
             post_nms_top_n=post_nms_top_n,
-            nms_thresh=cfg.MODEL.RPN.NMS_THRESH,
+            nms_thresh=args.rpn_nms_thresh,
         )
 
         faster_rcnn_predictor = FastRCNNPredictor(2048, 2)
@@ -51,13 +51,13 @@ class SeqNet(nn.Module):
         box_roi_pool = MultiScaleRoIAlign(
             featmap_names=["feat_res4"], output_size=14, sampling_ratio=2
         )
-        box_predictor = BBoxRegressor(2048, num_classes=2, bn_neck=cfg.MODEL.ROI_HEAD.BN_NECK)
+        box_predictor = BBoxRegressor(2048, num_classes=2, bn_neck=not args.roihead_no_bnneck)
         roi_heads = SeqRoIHeads(
             # OIM
-            num_pids=cfg.MODEL.LOSS.LUT_SIZE,
-            num_cq_size=cfg.MODEL.LOSS.CQ_SIZE,
-            oim_momentum=cfg.MODEL.LOSS.OIM_MOMENTUM,
-            oim_scalar=cfg.MODEL.LOSS.OIM_SCALAR,
+            num_pids=args.oim_lut_size,
+            num_cq_size=args.oim_cq_size,
+            oim_momentum=args.oim_momentum,
+            oim_scalar=args.oim_scalar,
             # SeqNet
             faster_rcnn_predictor=faster_rcnn_predictor,
             reid_head=reid_head,
@@ -65,19 +65,19 @@ class SeqNet(nn.Module):
             box_roi_pool=box_roi_pool,
             box_head=box_head,
             box_predictor=box_predictor,
-            fg_iou_thresh=cfg.MODEL.ROI_HEAD.POS_THRESH_TRAIN,
-            bg_iou_thresh=cfg.MODEL.ROI_HEAD.NEG_THRESH_TRAIN,
-            batch_size_per_image=cfg.MODEL.ROI_HEAD.BATCH_SIZE_TRAIN,
-            positive_fraction=cfg.MODEL.ROI_HEAD.POS_FRAC_TRAIN,
+            fg_iou_thresh=args.roihead_pos_thresh_train,
+            bg_iou_thresh=args.roihead_neg_thresh_train,
+            batch_size_per_image=args.roihead_batchsize_train,
+            positive_fraction=args.roihead_pos_frac_train,
             bbox_reg_weights=None,
-            score_thresh=cfg.MODEL.ROI_HEAD.SCORE_THRESH_TEST,
-            nms_thresh=cfg.MODEL.ROI_HEAD.NMS_THRESH_TEST,
-            detections_per_img=cfg.MODEL.ROI_HEAD.DETECTIONS_PER_IMAGE_TEST,
+            score_thresh=args.roihead_score_thresh_test,
+            nms_thresh=args.roihead_nms_thresh_test,
+            detections_per_img=args.roihead_detections_per_img_test,
         )
 
         transform = GeneralizedRCNNTransform(
-            min_size=cfg.INPUT.MIN_SIZE,
-            max_size=cfg.INPUT.MAX_SIZE,
+            min_size=args.min_size,
+            max_size=args.max_size,
             image_mean=[0.485, 0.456, 0.406],
             image_std=[0.229, 0.224, 0.225],
         )
@@ -88,13 +88,23 @@ class SeqNet(nn.Module):
         self.transform = transform
 
         # loss weights
-        self.lw_rpn_reg = cfg.SOLVER.LW_RPN_REG
-        self.lw_rpn_cls = cfg.SOLVER.LW_RPN_CLS
-        self.lw_proposal_reg = cfg.SOLVER.LW_PROPOSAL_REG
-        self.lw_proposal_cls = cfg.SOLVER.LW_PROPOSAL_CLS
-        self.lw_box_reg = cfg.SOLVER.LW_BOX_REG
-        self.lw_box_cls = cfg.SOLVER.LW_BOX_CLS
-        self.lw_box_reid = cfg.SOLVER.LW_BOX_REID
+        self.lw_rpn_reg = args.lw_rpn_reg
+        self.lw_rpn_cls = args.lw_rpn_cls
+        self.lw_proposal_reg = args.lw_proposal_reg
+        self.lw_proposal_cls = args.lw_proposal_cls
+        self.lw_box_reg = args.lw_box_reg
+        self.lw_box_cls = args.lw_box_cls
+        self.lw_box_reid = args.lw_box_reid
+
+    def preprocess_batch(self, batch):
+        images, targets = batch
+        device = next(self.parameters()).device
+        images = [image.to(device) for image in images]
+        if targets is not None:
+            for target in targets:
+                target["boxes"] = target["boxes"].to(device)
+                target["labels"] = target["labels"].to(device)
+        return images, targets
 
     def inference(self, images, targets=None, query_img_as_gallery=False):
         """
@@ -127,7 +137,9 @@ class SeqNet(nn.Module):
             )
             return detections
 
-    def forward(self, images, targets=None, query_img_as_gallery=False):
+    def forward(self, batch, query_img_as_gallery=False):
+        images, targets = self.preprocess_batch(batch)
+
         if not self.training:
             return self.inference(images, targets, query_img_as_gallery)
 

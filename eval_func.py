@@ -1,11 +1,18 @@
+import json
+import logging
+import os
 import os.path as osp
+from copy import deepcopy
 
 import numpy as np
+import torch
 from scipy.io import loadmat
 from sklearn.metrics import average_precision_score
+from tqdm import tqdm
 
 from utils.km import run_kuhn_munkres
-from utils.utils import write_json
+
+logger = logging.getLogger(__name__)
 
 
 def _compute_iou(a, b):
@@ -16,6 +23,110 @@ def _compute_iou(a, b):
     inter = max(0, x2 - x1) * max(0, y2 - y1)
     union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
     return inter * 1.0 / union
+
+
+def _write_json(obj, fpath):
+    os.makedirs(osp.dirname(fpath), exist_ok=True)
+    _obj = obj.copy()
+    for k, v in _obj.items():
+        if isinstance(v, np.ndarray):
+            _obj.pop(k)
+    with open(fpath, "w") as f:
+        json.dump(_obj, f, indent=4, separators=(",", ": "))
+
+
+@torch.no_grad()
+def evaluate_performance(
+    model, gallery_loader, query_loader, device, use_gt=False, use_cache=False, use_cbgm=False
+):
+    """
+    Args:
+        use_gt (bool, optional): Whether to use GT as detection results to verify the upper
+                                bound of person search performance. Defaults to False.
+        use_cache (bool, optional): Whether to use the cached features. Defaults to False.
+        use_cbgm (bool, optional): Whether to use Context Bipartite Graph Matching algorithm.
+                                Defaults to False.
+    """
+    model.eval()
+    if use_cache:
+        eval_cache = torch.load("data/eval_cache/eval_cache.pth")
+        gallery_dets = eval_cache["gallery_dets"]
+        gallery_feats = eval_cache["gallery_feats"]
+        query_dets = eval_cache["query_dets"]
+        query_feats = eval_cache["query_feats"]
+        query_box_feats = eval_cache["query_box_feats"]
+    else:
+        gallery_dets, gallery_feats = [], []
+        for images, targets in tqdm(gallery_loader, ncols=0):
+            if not use_gt:
+                outputs = model((images, None))
+            else:
+                boxes = targets[0]["boxes"].to(device)
+                n_boxes = boxes.size(0)
+                embeddings = model((images, targets))
+                outputs = [
+                    {
+                        "boxes": boxes,
+                        "embeddings": torch.cat(embeddings),
+                        "labels": torch.ones(n_boxes).to(device),
+                        "scores": torch.ones(n_boxes).to(device),
+                    }
+                ]
+
+            for output in outputs:
+                box_w_scores = torch.cat([output["boxes"], output["scores"].unsqueeze(1)], dim=1)
+                gallery_dets.append(box_w_scores.cpu().numpy())
+                gallery_feats.append(output["embeddings"].cpu().numpy())
+
+        # regarding query image as gallery to detect all people
+        # i.e. query person + surrounding people (context information)
+        query_dets, query_feats = [], []
+        for images, targets in tqdm(query_loader, ncols=0):
+            # targets will be modified in the model, so deepcopy it
+            outputs = model((images, deepcopy(targets)), query_img_as_gallery=True)
+
+            # consistency check
+            gt_box = targets[0]["boxes"].squeeze()
+            assert (
+                gt_box - outputs[0]["boxes"][0].cpu()
+            ).sum() <= 0.001, "GT box must be the first one in the detected boxes of query image"
+
+            for output in outputs:
+                box_w_scores = torch.cat([output["boxes"], output["scores"].unsqueeze(1)], dim=1)
+                query_dets.append(box_w_scores.cpu().numpy())
+                query_feats.append(output["embeddings"].cpu().numpy())
+
+        # extract the features of query boxes
+        query_box_feats = []
+        for images, targets in tqdm(query_loader, ncols=0):
+            embeddings = model((images, targets))
+            assert len(embeddings) == 1, "batch size in test phase should be 1"
+            query_box_feats.append(embeddings[0].cpu().numpy())
+
+        os.makedirs("data/eval_cache", exist_ok=True)
+        save_dict = {
+            "gallery_dets": gallery_dets,
+            "gallery_feats": gallery_feats,
+            "query_dets": query_dets,
+            "query_feats": query_feats,
+            "query_box_feats": query_box_feats,
+        }
+        torch.save(save_dict, "data/eval_cache/eval_cache.pth")
+
+    eval_detection(gallery_loader.dataset, gallery_dets, det_thresh=0.01)
+    eval_search_func = (
+        eval_search_cuhk if gallery_loader.dataset.name == "CUHK-SYSU" else eval_search_prw
+    )
+    eval_search_func(
+        gallery_loader.dataset,
+        query_loader.dataset,
+        gallery_dets,
+        gallery_feats,
+        query_box_feats,
+        query_dets,
+        query_feats,
+        cbgm=use_cbgm,
+    )
 
 
 def eval_detection(
@@ -79,10 +190,10 @@ def eval_detection(
     det_rate = count_tp * 1.0 / count_gt
     ap = average_precision_score(y_true, y_score) * det_rate
 
-    print("{} detection:".format("labeled only" if labeled_only else "all"))
-    print("  recall = {:.2%}".format(det_rate))
+    logger.info("{} detection:".format("labeled only" if labeled_only else "all"))
+    logger.info("  recall = {:.2%}".format(det_rate))
     if not labeled_only:
-        print("  ap = {:.2%}".format(ap))
+        logger.info("  ap = {:.2%}".format(ap))
     return det_rate, ap
 
 
@@ -285,13 +396,13 @@ def eval_search_cuhk(
             )
         ret["results"].append(new_entry)
 
-    print("search ranking:")
-    print("  mAP = {:.2%}".format(np.mean(aps)))
+    logger.info("search ranking:")
+    logger.info("  mAP = {:.2%}".format(np.mean(aps)))
     accs = np.mean(accs, axis=0)
     for i, k in enumerate(topk):
-        print("  top-{:2d} = {:.2%}".format(k, accs[i]))
+        logger.info("  top-{:2d} = {:.2%}".format(k, accs[i]))
 
-    write_json(ret, "vis/results.json")
+    _write_json(ret, "vis/results.json")
 
     ret["mAP"] = np.mean(aps)
     ret["accs"] = accs
@@ -318,7 +429,7 @@ def eval_search_prw(
     query_feat (list of ndarray): D dimensional features per query image
     det_thresh (float): filter out gallery detections whose scores below this
     gallery_size (int): -1 for using full set
-    ignore_cam_id (bool): Set to True acoording to CUHK-SYSU,
+    ignore_cam_id (bool): Set to True according to CUHK-SYSU,
                         although it's a common practice to focus on cross-cam match only.
     """
     assert len(gallery_dataset) == len(gallery_dets)
@@ -350,7 +461,7 @@ def eval_search_prw(
         query_pid = query_dataset.annotations[i]["pids"]
         query_cam = query_dataset.annotations[i]["cam_id"]
 
-        # Find all occurence of this query
+        # Find all occurrence of this query
         gallery_imgs = []
         for x in annos:
             if query_pid in x["pids"] and x["img_name"] != query_imname:
@@ -471,14 +582,14 @@ def eval_search_prw(
             )
         ret["results"].append(new_entry)
 
-    print("search ranking:")
+    logger.info("search ranking:")
     mAP = np.mean(aps)
-    print("  mAP = {:.2%}".format(mAP))
+    logger.info("  mAP = {:.2%}".format(mAP))
     accs = np.mean(accs, axis=0)
     for i, k in enumerate(topk):
-        print("  top-{:2d} = {:.2%}".format(k, accs[i]))
+        logger.info("  top-{:2d} = {:.2%}".format(k, accs[i]))
 
-    # write_json(ret, "vis/results.json")
+    # _write_json(ret, "vis/results.json")
 
     ret["mAP"] = np.mean(aps)
     ret["accs"] = accs

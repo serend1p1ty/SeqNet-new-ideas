@@ -1,10 +1,6 @@
-OUTPUT_DIR: "./exp_cuhk"
-INPUT:
-  DATASET: "CUHK-SYSU"
-  DATA_ROOT: "data/CUHK-SYSU"
-SOLVER:
-  MAX_EPOCHS: 20
-MODEL:
-  LOSS:
-    LUT_SIZE: 5532
-    CQ_SIZE: 5000
+output_dir: "./exp_cuhk"
+dataset: "CUHK-SYSU"
+data_root: "data/CUHK-SYSU"
+max_epochs: 20
+oim_lut_size: 5532
+oim_cq_size: 5000

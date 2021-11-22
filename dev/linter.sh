@@ -3,15 +3,15 @@
 # Run this script at project root by "./dev/linter.sh" before you commit
 
 {
-  black --version | grep -E "20.8b1" > /dev/null
+  black --version | grep -E "21.9b0" > /dev/null
 } || {
-  echo "Linter requires 'black==20.8b1' !"
+  echo "Linter requires 'black==21.9b0' !"
   exit 1
 }
 
 ISORT_VERSION=$(isort --version-number)
-if [[ "$ISORT_VERSION" != 5.8.0 ]]; then
-  echo "Linter requires isort==5.8.0 !"
+if [[ "$ISORT_VERSION" != 5.9.3 ]]; then
+  echo "Linter requires isort==5.9.3 !"
   exit 1
 fi
 

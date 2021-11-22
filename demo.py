@@ -1,4 +1,3 @@
-import argparse
 from glob import glob
 
 import matplotlib.pyplot as plt
@@ -7,9 +6,8 @@ import torch.utils.data
 from PIL import Image
 from torchvision.transforms import functional as F
 
-from defaults import get_default_cfg
+from config import get_argparser
 from models.seqnet import SeqNet
-from utils.utils import resume_from_ckpt
 
 
 def visualize_result(img_path, detections, similarities):
@@ -41,20 +39,15 @@ def visualize_result(img_path, detections, similarities):
 
 
 def main(args):
-    cfg = get_default_cfg()
-    if args.cfg_file:
-        cfg.merge_from_file(args.cfg_file)
-    cfg.merge_from_list(args.opts)
-    cfg.freeze()
-
-    device = torch.device(cfg.DEVICE)
+    device = torch.device(args.device)
 
     print("Creating model")
-    model = SeqNet(cfg)
+    model = SeqNet(args)
     model.to(device)
     model.eval()
 
-    resume_from_ckpt(args.ckpt, model)
+    assert args.checkpoint
+    model.load_state_dict(torch.load(args.checkpoint, map_location="cpu")["model"])
 
     query_img = [F.to_tensor(Image.open("demo_imgs/query.jpg").convert("RGB")).to(device)]
     query_target = [{"boxes": torch.tensor([[0, 0, 466, 943]]).to(device)}]
@@ -76,11 +69,6 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Train a person search network.")
-    parser.add_argument("--cfg", dest="cfg_file", help="Path to configuration file.")
-    parser.add_argument("--ckpt", required=True, help="Path to checkpoint to resume or evaluate.")
-    parser.add_argument(
-        "opts", nargs=argparse.REMAINDER, help="Modify config options using the command-line"
-    )
+    parser = get_argparser()
     args = parser.parse_args()
     main(args)

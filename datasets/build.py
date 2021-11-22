@@ -1,10 +1,36 @@
+import logging
+
 import torch
 
 from utils.transforms import build_transforms
-from utils.utils import create_small_table
 
 from .cuhk_sysu import CUHKSYSU
 from .prw import PRW
+
+logger = logging.getLogger(__name__)
+
+
+def create_small_table(small_dict):
+    """
+    Create a small table using the keys of small_dict as headers. This is only
+    suitable for small dictionaries.
+
+    Args:
+        small_dict (dict): a result dictionary of only a few items.
+
+    Returns:
+        str: the table as a string.
+    """
+    keys, values = tuple(zip(*small_dict.items()))
+    table = tabulate(
+        [values],
+        headers=keys,
+        tablefmt="pipe",
+        floatfmt=".3f",
+        stralign="center",
+        numalign="center",
+    )
+    return table
 
 
 def print_statistics(dataset):
@@ -47,7 +73,7 @@ def print_statistics(dataset):
                     "unlabeled_pid": int(unlabeled_pid),
                 }
             )
-    print(f"=> {dataset.name}-{dataset.split} loaded:\n" + create_small_table(statistics))
+    logger.info(f"=> {dataset.name}-{dataset.split} loaded:\n" + create_small_table(statistics))
 
 
 def build_dataset(dataset_name, root, transforms, split, verbose=True):
@@ -66,37 +92,37 @@ def collate_fn(batch):
     return tuple(zip(*batch))
 
 
-def build_train_loader(cfg):
+def build_train_loader(args):
     transforms = build_transforms(is_train=True)
-    dataset = build_dataset(cfg.INPUT.DATASET, cfg.INPUT.DATA_ROOT, transforms, "train")
+    dataset = build_dataset(args.dataset, args.data_root, transforms, "train")
     return torch.utils.data.DataLoader(
         dataset,
-        batch_size=cfg.INPUT.BATCH_SIZE_TRAIN,
+        batch_size=args.batchsize_train,
         shuffle=True,
-        num_workers=cfg.INPUT.NUM_WORKERS_TRAIN,
+        num_workers=args.workers_train,
         pin_memory=True,
         drop_last=True,
         collate_fn=collate_fn,
     )
 
 
-def build_test_loader(cfg):
+def build_test_loader(args):
     transforms = build_transforms(is_train=False)
-    gallery_set = build_dataset(cfg.INPUT.DATASET, cfg.INPUT.DATA_ROOT, transforms, "gallery")
-    query_set = build_dataset(cfg.INPUT.DATASET, cfg.INPUT.DATA_ROOT, transforms, "query")
+    gallery_set = build_dataset(args.dataset, args.data_root, transforms, "gallery")
+    query_set = build_dataset(args.dataset, args.data_root, transforms, "query")
     gallery_loader = torch.utils.data.DataLoader(
         gallery_set,
-        batch_size=cfg.INPUT.BATCH_SIZE_TEST,
+        batch_size=args.batchsize_test,
         shuffle=False,
-        num_workers=cfg.INPUT.NUM_WORKERS_TEST,
+        num_workers=args.workers_test,
         pin_memory=True,
         collate_fn=collate_fn,
     )
     query_loader = torch.utils.data.DataLoader(
         query_set,
-        batch_size=cfg.INPUT.BATCH_SIZE_TEST,
+        batch_size=args.batchsize_test,
         shuffle=False,
-        num_workers=cfg.INPUT.NUM_WORKERS_TEST,
+        num_workers=args.workers_test,
         pin_memory=True,
         collate_fn=collate_fn,
     )

@@ -12,3 +12,5 @@ tqdm==4.48.2
 yacs==0.1.8
 future==0.18.2
 tensorboard==2.4.1
+git+https://github.com/serend1p1ty/core-pytorch-utils.git
+timm
