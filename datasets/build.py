@@ -1,10 +1,14 @@
+import logging
+
 import torch
+from cpu.misc import create_small_table
 
 from utils.transforms import build_transforms
-from utils.utils import create_small_table
 
 from .cuhk_sysu import CUHKSYSU
 from .prw import PRW
+
+logger = logging.getLogger(__name__)
 
 
 def print_statistics(dataset):
@@ -47,7 +51,7 @@ def print_statistics(dataset):
                     "unlabeled_pid": int(unlabeled_pid),
                 }
             )
-    print(f"=> {dataset.name}-{dataset.split} loaded:\n" + create_small_table(statistics))
+    logger.info(f"=> {dataset.name}-{dataset.split} loaded:\n" + create_small_table(statistics))
 
 
 def build_dataset(dataset_name, root, transforms, split, verbose=True):

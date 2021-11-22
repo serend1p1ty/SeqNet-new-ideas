@@ -7,6 +7,7 @@ from torch import autograd, nn
 
 class OIM(autograd.Function):
     @staticmethod
+    @torch.cuda.amp.autocast()
     def forward(ctx, inputs, targets, lut, cq, header, momentum):
         ctx.save_for_backward(inputs, targets, lut, cq, header, momentum)
         outputs_labeled = inputs.mm(lut.t())
@@ -14,6 +15,7 @@ class OIM(autograd.Function):
         return torch.cat([outputs_labeled, outputs_unlabeled], dim=1)
 
     @staticmethod
+    @torch.cuda.amp.autocast()
     def backward(ctx, grad_outputs):
         inputs, targets, lut, cq, header, momentum = ctx.saved_tensors
 

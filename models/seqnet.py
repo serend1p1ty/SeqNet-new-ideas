@@ -96,6 +96,16 @@ class SeqNet(nn.Module):
         self.lw_box_cls = cfg.SOLVER.LW_BOX_CLS
         self.lw_box_reid = cfg.SOLVER.LW_BOX_REID
 
+    def preprocess_batch(self, batch):
+        images, targets = batch
+        device = next(self.parameters()).device
+        images = [image.to(device) for image in images]
+        if targets is not None:
+            for target in targets:
+                target["boxes"] = target["boxes"].to(device)
+                target["labels"] = target["labels"].to(device)
+        return images, targets
+
     def inference(self, images, targets=None, query_img_as_gallery=False):
         """
         query_img_as_gallery: Set to True to detect all people in the query image.
@@ -127,7 +137,9 @@ class SeqNet(nn.Module):
             )
             return detections
 
-    def forward(self, images, targets=None, query_img_as_gallery=False):
+    def forward(self, batch, query_img_as_gallery=False):
+        images, targets = self.preprocess_batch(batch)
+
         if not self.training:
             return self.inference(images, targets, query_img_as_gallery)
 

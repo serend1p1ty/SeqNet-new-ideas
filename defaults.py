@@ -145,6 +145,8 @@ _C.DEVICE = "cuda"
 _C.SEED = 1
 # Directory where output files are written
 _C.OUTPUT_DIR = "./output"
+# Whether to enable Automatic Mixed Precision (AMP) training
+_C.ENABLE_AMP = True
 
 
 def get_default_cfg():
