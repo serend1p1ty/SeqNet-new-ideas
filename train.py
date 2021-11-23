@@ -6,6 +6,7 @@ import torch.utils.data
 from cpu import (
     EvalHook,
     Trainer,
+    collect_env,
     default_argparser,
     merge_cfg_from_args,
     save_config,
@@ -26,6 +27,7 @@ def main(args):
     merge_cfg_from_args(cfg, args)
 
     setup_logger(output=cfg.OUTPUT_DIR)
+    logger.info(f"\n{collect_env()}")
 
     device = torch.device(cfg.DEVICE)
     set_random_seed(cfg.SEED)
