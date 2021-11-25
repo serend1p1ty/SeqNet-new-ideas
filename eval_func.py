@@ -2,7 +2,6 @@ import json
 import logging
 import os
 import os.path as osp
-from copy import deepcopy
 
 import numpy as np
 import torch
@@ -52,8 +51,8 @@ def evaluate_performance(
         eval_cache = torch.load("data/eval_cache/eval_cache.pth")
         gallery_dets = eval_cache["gallery_dets"]
         gallery_feats = eval_cache["gallery_feats"]
-        query_dets = eval_cache["query_dets"]
-        query_feats = eval_cache["query_feats"]
+        # query_dets = eval_cache["query_dets"]
+        # query_feats = eval_cache["query_feats"]
         query_box_feats = eval_cache["query_box_feats"]
     else:
         gallery_dets, gallery_feats = [], []
@@ -78,23 +77,23 @@ def evaluate_performance(
                 gallery_dets.append(box_w_scores.cpu().numpy())
                 gallery_feats.append(output["embeddings"].cpu().numpy())
 
-        # regarding query image as gallery to detect all people
-        # i.e. query person + surrounding people (context information)
-        query_dets, query_feats = [], []
-        for images, targets in tqdm(query_loader, ncols=0):
-            # targets will be modified in the model, so deepcopy it
-            outputs = model((images, deepcopy(targets)), query_img_as_gallery=True)
+        # # regarding query image as gallery to detect all people
+        # # i.e. query person + surrounding people (context information)
+        # query_dets, query_feats = [], []
+        # for images, targets in tqdm(query_loader, ncols=0):
+        #     # targets will be modified in the model, so deepcopy it
+        #     outputs = model((images, deepcopy(targets)), query_img_as_gallery=True)
 
-            # consistency check
-            gt_box = targets[0]["boxes"].squeeze()
-            assert (
-                gt_box - outputs[0]["boxes"][0].cpu()
-            ).sum() <= 0.001, "GT box must be the first one in the detected boxes of query image"
+        #     # consistency check
+        #     gt_box = targets[0]["boxes"].squeeze()
+        #     assert (
+        #         gt_box - outputs[0]["boxes"][0].cpu()
+        #     ).sum() <= 0.001, "GT box must be the first one in the detected boxes of query image"
 
-            for output in outputs:
-                box_w_scores = torch.cat([output["boxes"], output["scores"].unsqueeze(1)], dim=1)
-                query_dets.append(box_w_scores.cpu().numpy())
-                query_feats.append(output["embeddings"].cpu().numpy())
+        #     for output in outputs:
+        #         box_w_scores = torch.cat([output["boxes"], output["scores"].unsqueeze(1)], dim=1)
+        #         query_dets.append(box_w_scores.cpu().numpy())
+        #         query_feats.append(output["embeddings"].cpu().numpy())
 
         # extract the features of query boxes
         query_box_feats = []
@@ -107,8 +106,8 @@ def evaluate_performance(
         save_dict = {
             "gallery_dets": gallery_dets,
             "gallery_feats": gallery_feats,
-            "query_dets": query_dets,
-            "query_feats": query_feats,
+            # "query_dets": query_dets,
+            # "query_feats": query_feats,
             "query_box_feats": query_box_feats,
         }
         torch.save(save_dict, "data/eval_cache/eval_cache.pth")
@@ -123,8 +122,8 @@ def evaluate_performance(
         gallery_dets,
         gallery_feats,
         query_box_feats,
-        query_dets,
-        query_feats,
+        # query_dets,
+        # query_feats,
         cbgm=use_cbgm,
     )
 
@@ -203,8 +202,8 @@ def eval_search_cuhk(
     gallery_dets,
     gallery_feats,
     query_box_feats,
-    query_dets,
-    query_feats,
+    # query_dets,
+    # query_feats,
     k1=10,
     k2=3,
     det_thresh=0.5,
@@ -307,38 +306,38 @@ def eval_search_cuhk(
                 imgs.extend([gallery_imname] * len(sim))
                 rois.extend(list(det))
 
-        if cbgm:
-            # -------- Context Bipartite Graph Matching (CBGM) ------- #
-            sims = np.array(sims)
-            imgs_cbgm = np.array(imgs_cbgm)
-            # only process the top-k1 gallery images for efficiency
-            inds = np.argsort(sims)[-k1:]
-            imgs_cbgm = set(imgs_cbgm[inds])
-            for img in imgs_cbgm:
-                sim = name2sim[img]
-                det, feat_g = name_to_det_feat[img]
-                # only regard the people with top-k2 detection confidence
-                # in the query image as context information
-                qboxes = query_dets[i][:k2]
-                qfeats = query_feats[i][:k2]
-                assert (
-                    query_roi - qboxes[0][:4]
-                ).sum() <= 0.001, "query_roi must be the first one in pboxes"
+        # if cbgm:
+        #     # -------- Context Bipartite Graph Matching (CBGM) ------- #
+        #     sims = np.array(sims)
+        #     imgs_cbgm = np.array(imgs_cbgm)
+        #     # only process the top-k1 gallery images for efficiency
+        #     inds = np.argsort(sims)[-k1:]
+        #     imgs_cbgm = set(imgs_cbgm[inds])
+        #     for img in imgs_cbgm:
+        #         sim = name2sim[img]
+        #         det, feat_g = name_to_det_feat[img]
+        #         # only regard the people with top-k2 detection confidence
+        #         # in the query image as context information
+        #         qboxes = query_dets[i][:k2]
+        #         qfeats = query_feats[i][:k2]
+        #         assert (
+        #             query_roi - qboxes[0][:4]
+        #         ).sum() <= 0.001, "query_roi must be the first one in pboxes"
 
-                # build the bipartite graph and run Kuhn-Munkres (K-M) algorithm
-                # to find the best match
-                graph = []
-                for indx_i, pfeat in enumerate(qfeats):
-                    for indx_j, gfeat in enumerate(feat_g):
-                        graph.append((indx_i, indx_j, (pfeat * gfeat).sum()))
-                km_res, max_val = run_kuhn_munkres(graph)
+        #         # build the bipartite graph and run Kuhn-Munkres (K-M) algorithm
+        #         # to find the best match
+        #         graph = []
+        #         for indx_i, pfeat in enumerate(qfeats):
+        #             for indx_j, gfeat in enumerate(feat_g):
+        #                 graph.append((indx_i, indx_j, (pfeat * gfeat).sum()))
+        #         km_res, max_val = run_kuhn_munkres(graph)
 
-                # revise the similarity between query person and its matching
-                for indx_i, indx_j, _ in km_res:
-                    # 0 denotes the query roi
-                    if indx_i == 0:
-                        sim[indx_j] = max_val
-                        break
+        #         # revise the similarity between query person and its matching
+        #         for indx_i, indx_j, _ in km_res:
+        #             # 0 denotes the query roi
+        #             if indx_i == 0:
+        #                 sim[indx_j] = max_val
+        #                 break
         for gallery_imname, sim in name2sim.items():
             gt = name2gt[gallery_imname]
             det, feat_g = name_to_det_feat[gallery_imname]
