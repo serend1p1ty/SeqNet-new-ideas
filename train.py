@@ -8,7 +8,7 @@ from cpu import (
     Trainer,
     collect_env,
     default_argparser,
-    merge_cfg_from_args,
+    highlight,
     save_config,
     set_random_seed,
     setup_logger,
@@ -24,16 +24,25 @@ logger = logging.getLogger(__name__)
 
 def main(args):
     cfg = get_default_cfg()
-    merge_cfg_from_args(cfg, args)
+    if args.config_file:
+        cfg.merge_from_file(args.config_file)
+    cfg.merge_from_list(args.opts)
+    cfg.freeze()
 
     setup_logger(output=cfg.OUTPUT_DIR)
     logger.info(f"\n{collect_env()}")
+    print(
+        "Contents of args.config_file={}:\n{}".format(
+            args.config_file, highlight(open(args.config_file, "r").read(), args.config_file)
+        )
+    )
+    print(f"Running with full config:\n{highlight(cfg.dump(), '.yaml')}")
 
     device = torch.device(cfg.DEVICE)
     set_random_seed(cfg.SEED)
 
     logger.info("Creating model")
-    model = SeqNet(cfg)
+    model = SeqNet(cfg, num_selayers=args.num_selayers)
     model.to(device)
 
     logger.info("Loading data")
@@ -92,5 +101,6 @@ def main(args):
 
 if __name__ == "__main__":
     parser = default_argparser()
+    parser.add_argument("--num_selayers", type=int, default=4)
     args = parser.parse_args()
     main(args)

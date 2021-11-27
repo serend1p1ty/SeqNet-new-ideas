@@ -12,14 +12,16 @@ from torchvision.ops import MultiScaleRoIAlign
 from torchvision.ops import boxes as box_ops
 
 from models.oim import OIMLoss
-from models.resnet import build_resnet
+from models.resnet_backbone import build_resnet
 
 
 class SeqNet(nn.Module):
-    def __init__(self, cfg):
+    def __init__(self, cfg, num_selayers=4):
         super(SeqNet, self).__init__()
 
-        backbone, box_head = build_resnet(name="resnet50", pretrained=True)
+        backbone, box_head = build_resnet(
+            name="seresnet50", pretrained=True, num_selayers=num_selayers
+        )
 
         anchor_generator = AnchorGenerator(
             sizes=((32, 64, 128, 256, 512),), aspect_ratios=((0.5, 1.0, 2.0),)
