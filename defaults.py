@@ -131,7 +131,7 @@ _C.EVAL_USE_CACHE = False
 _C.EVAL_USE_CBGM = False
 
 # -------------------------------------------------------- #
-#                           Miscs                          #
+#                           Misc                           #
 # -------------------------------------------------------- #
 # Save a checkpoint after every this number of epochs
 _C.CKPT_PERIOD = 1

@@ -61,7 +61,7 @@ def evaluate_performance(
             if not use_gt:
                 outputs = model((images, None))
             else:
-                boxes = targets[0]["boxes"]
+                boxes = targets[0]["boxes"].to(device)
                 n_boxes = boxes.size(0)
                 embeddings = model((images, targets))
                 outputs = [
@@ -429,7 +429,7 @@ def eval_search_prw(
     query_feat (list of ndarray): D dimensional features per query image
     det_thresh (float): filter out gallery detections whose scores below this
     gallery_size (int): -1 for using full set
-    ignore_cam_id (bool): Set to True acoording to CUHK-SYSU,
+    ignore_cam_id (bool): Set to True according to CUHK-SYSU,
                         although it's a common practice to focus on cross-cam match only.
     """
     assert len(gallery_dataset) == len(gallery_dets)
@@ -461,7 +461,7 @@ def eval_search_prw(
         query_pid = query_dataset.annotations[i]["pids"]
         query_cam = query_dataset.annotations[i]["cam_id"]
 
-        # Find all occurence of this query
+        # Find all occurrence of this query
         gallery_imgs = []
         for x in annos:
             if query_pid in x["pids"] and x["img_name"] != query_imname:
