@@ -1,18 +1,11 @@
+import argparse
 import logging
+import os
 from functools import partial
 
 import torch
 import torch.utils.data
-from cpu import (
-    EvalHook,
-    Trainer,
-    collect_env,
-    default_argparser,
-    highlight,
-    save_config,
-    set_random_seed,
-    setup_logger,
-)
+from cpu import EvalHook, Trainer, collect_env, set_random_seed, setup_logger
 
 from datasets import build_test_loader, build_train_loader
 from defaults import get_default_cfg
@@ -22,7 +15,7 @@ from models.seqnet import SeqNet
 logger = logging.getLogger(__name__)
 
 
-def main(args):
+def setup(args):
     cfg = get_default_cfg()
     if args.config_file:
         cfg.merge_from_file(args.config_file)
@@ -30,13 +23,23 @@ def main(args):
     cfg.freeze()
 
     setup_logger(output=cfg.OUTPUT_DIR)
-    logger.info(f"\n{collect_env()}")
-    print(
-        "Contents of args.config_file={}:\n{}".format(
-            args.config_file, highlight(open(args.config_file, "r").read(), args.config_file)
-        )
-    )
-    print(f"Running with full config:\n{highlight(cfg.dump(), '.yaml')}")
+
+    logger.info("Environment info:\n" + collect_env())
+    logger.info("Command line arguments: " + str(args))
+    file_content = open(args.config_file, "r").read()
+    logger.info(f"Contents of args.config_file={args.config_file}:\n{file_content}")
+    logger.info(f"Running with full config:\n{cfg.dump()}")
+
+    if not args.eval_only:
+        os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
+        filename = os.path.join(cfg.OUTPUT_DIR, "config.yaml")
+        with open(filename, "w") as f:
+            f.write(cfg.dump())
+    return cfg
+
+
+def main(args):
+    cfg = setup(args)
 
     device = torch.device(cfg.DEVICE)
     set_random_seed(cfg.SEED)
@@ -94,12 +97,25 @@ def main(args):
             eval_func()
             exit(0)
 
-    logger.info("Start training")
-    save_config(cfg, cfg.OUTPUT_DIR)
     trainer.train()
 
 
 if __name__ == "__main__":
-    parser = default_argparser()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--cfg", default="", help="Path of the configuration file.")
+    parser.add_argument("--resume", action="store_true", help="Whether to resume from a checkpoint")
+    parser.add_argument("--eval", action="store_true", help="Perform evaluation only.")
+    parser.add_argument("--ckpt", default="", help="Path of the checkpoint to resume or evaluate.")
+    parser.add_argument("--workdir", type=str, default="", help="Path of the working directory")
+    parser.add_argument(
+        "opts", nargs=argparse.REMAINDER, help="Modify config options using the command-line"
+    )
     args = parser.parse_args()
+    if args.resume or args.eval_only:
+        assert args.checkpoint or args.work_dir
+    if args.checkpoint or args.work_dir:
+        assert args.resume or args.eval_only
+    if args.work_dir:
+        args.config_file = os.path.join(args.work_dir, "config.yaml")
+        args.checkpoint = os.path.join(args.work_dir, "checkpoints", "latest.pth")
     main(args)
