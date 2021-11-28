@@ -22,15 +22,17 @@ def setup(args):
     cfg.merge_from_list(args.opts)
     cfg.freeze()
 
-    setup_logger(output=cfg.OUTPUT_DIR)
+    if args.eval_only:
+        setup_logger()
+    else:
+        setup_logger(output=cfg.OUTPUT_DIR)
 
-    logger.info("Environment info:\n" + collect_env())
-    logger.info("Command line arguments: " + str(args))
-    file_content = open(args.config_file, "r").read()
-    logger.info(f"Contents of args.config_file={args.config_file}:\n{file_content}")
-    logger.info(f"Running with full config:\n{cfg.dump()}")
+        logger.info("Environment info:\n" + collect_env())
+        logger.info("Command line arguments: " + str(args))
+        file_content = open(args.config_file, "r").read()
+        logger.info(f"Contents of args.config_file={args.config_file}:\n{file_content}")
+        logger.info(f"Running with full config:\n{cfg.dump()}")
 
-    if not args.eval_only:
         os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
         filename = os.path.join(cfg.OUTPUT_DIR, "config.yaml")
         with open(filename, "w") as f:
@@ -102,11 +104,13 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--cfg", default="", help="Path of the configuration file.")
+    parser.add_argument("--config-file", default="", help="Path of the configuration file.")
     parser.add_argument("--resume", action="store_true", help="Whether to resume from a checkpoint")
-    parser.add_argument("--eval", action="store_true", help="Perform evaluation only.")
-    parser.add_argument("--ckpt", default="", help="Path of the checkpoint to resume or evaluate.")
-    parser.add_argument("--workdir", type=str, default="", help="Path of the working directory")
+    parser.add_argument("--eval-only", action="store_true", help="Perform evaluation only.")
+    parser.add_argument(
+        "--checkpoint", default="", help="Path of the checkpoint to resume or evaluate."
+    )
+    parser.add_argument("--work-dir", type=str, default="", help="Path of the working directory")
     parser.add_argument(
         "opts", nargs=argparse.REMAINDER, help="Modify config options using the command-line"
     )
