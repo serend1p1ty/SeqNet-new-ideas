@@ -1,7 +1,7 @@
 from collections import OrderedDict
 
+import timm
 import torch.nn.functional as F
-import torchvision
 from torch import nn
 
 
@@ -12,7 +12,7 @@ class Backbone(nn.Sequential):
                 [
                     ["conv1", resnet.conv1],
                     ["bn1", resnet.bn1],
-                    ["relu", resnet.relu],
+                    ["relu", resnet.act1],
                     ["maxpool", resnet.maxpool],
                     ["layer1", resnet.layer1],  # res2
                     ["layer2", resnet.layer2],  # res3
@@ -36,12 +36,17 @@ class Res5Head(nn.Sequential):
     def forward(self, x):
         feat = super(Res5Head, self).forward(x)
         x = F.adaptive_max_pool2d(x, 1)
-        feat = F.adaptive_max_pool2d(feat, 1)
+        # feat = F.adaptive_max_pool2d(feat, 1)
         return OrderedDict([["feat_res4", x], ["feat_res5", feat]])
 
 
 def build_resnet(name="resnet50", pretrained=True):
-    resnet = torchvision.models.resnet.__dict__[name](pretrained=pretrained)
+    # resnet = torchvision.models.resnet.__dict__[name](pretrained=pretrained)
+    resnet = timm.create_model("seresnet50", True)
+
+    # # remove the final downsample
+    # resnet.layer4[0].downsample[0].stride = (1, 1)
+    # resnet.layer4[0].conv2.stride = (1, 1)
 
     # freeze layers
     resnet.conv1.weight.requires_grad_(False)

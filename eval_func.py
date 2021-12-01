@@ -197,6 +197,20 @@ def eval_detection(
     return det_rate, ap
 
 
+def cal_sim_by_part(feat_g, feat_q, parts=6):
+    """
+    Args:
+        feat_g (array[N, 6, 256])
+        feat_q (array[6, 256])
+    """
+    for i in range(parts):
+        if i == 0:
+            sim = feat_g[:, i].dot(feat_q[i])
+        else:
+            sim += feat_g[:, i].dot(feat_q[i])
+    return sim
+
+
 def eval_search_cuhk(
     gallery_dataset,
     query_dataset,
@@ -249,7 +263,7 @@ def eval_search_cuhk(
         imgs, rois = [], []
         count_gt, count_tp = 0, 0
         # get L2-normalized feature vector
-        feat_q = query_box_feats[i].ravel()
+        feat_q = query_box_feats[i].squeeze()
         # ignore the query image
         query_imname = str(protoc["Query"][i]["imname"][0, 0][0])
         query_roi = protoc["Query"][i]["idlocate"][0, 0][0].astype(np.int32)
@@ -275,10 +289,11 @@ def eval_search_cuhk(
             if det.shape[0] == 0:
                 continue
             # get L2-normalized feature matrix NxD
-            assert feat_g.size == np.prod(feat_g.shape[:2])
-            feat_g = feat_g.reshape(feat_g.shape[:2])
+            assert feat_g.size == np.prod(feat_g.shape[:3])
+            feat_g = feat_g.reshape(feat_g.shape[:3])
             # compute cosine similarities
-            sim = feat_g.dot(feat_q).ravel()
+            # sim = feat_g.dot(feat_q).ravel()
+            sim = cal_sim_by_part(feat_g, feat_q)
 
             if gallery_imname in name2sim:
                 continue

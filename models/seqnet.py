@@ -15,6 +15,32 @@ from models.oim import OIMLoss
 from models.resnet import build_resnet
 
 
+def pcb_forward(nae_head, box_features, avgpool, dropout, parts=6):
+    bs = len(box_features["feat_res5"])
+    box_embeddings = [[] for _ in range(bs)]
+    box_cls_scores = [[] for _ in range(bs)]
+    # [N, 2048, 14, 14] -> [N, 2048, 6, 1]
+    all_part_feats = dropout(avgpool(box_features["feat_res5"]))
+    for i in range(parts):
+        box_features["feat_res5"] = all_part_feats[:, :, i].squeeze(2)
+        part_embeddings, part_cls_scores = nae_head(box_features)
+        if part_cls_scores.dim() == 0:
+            part_cls_scores = part_cls_scores.unsqueeze(0)
+
+        for embed, part_embed, score, part_score in zip(
+            box_embeddings, part_embeddings, box_cls_scores, part_cls_scores
+        ):
+            embed.append(part_embed)
+            score.append(part_score)
+    for i in range(bs):
+        box_embeddings[i] = torch.stack(box_embeddings[i])
+        box_cls_scores[i] = torch.stack(box_cls_scores[i])
+    box_embeddings = torch.stack(box_embeddings)
+    box_cls_scores = torch.stack(box_cls_scores)
+    # [N, 6, 256], [N, 6]
+    return box_embeddings, box_cls_scores
+
+
 class SeqNet(nn.Module):
     def __init__(self, cfg):
         super(SeqNet, self).__init__()
@@ -124,8 +150,13 @@ class SeqNet(nn.Module):
             boxes = [t["boxes"] for t in targets]
             box_features = self.roi_heads.box_roi_pool(features, boxes, images.image_sizes)
             box_features = self.roi_heads.reid_head(box_features)
-            embeddings, _ = self.roi_heads.embedding_head(box_features)
-            return embeddings.split(1, 0)
+            box_embeddings, _ = pcb_forward(
+                self.roi_heads.embedding_head,
+                box_features,
+                self.roi_heads.avgpool,
+                self.roi_heads.dropout,
+            )
+            return box_embeddings.split(1, 0)
         else:
             # gallery
             proposals, _ = self.rpn(images, features, targets)
@@ -176,16 +207,25 @@ class SeqRoIHeads(RoIHeads):
         oim_scalar,
         faster_rcnn_predictor,
         reid_head,
+        parts=6,
         *args,
-        **kwargs
+        **kwargs,
     ):
         super(SeqRoIHeads, self).__init__(*args, **kwargs)
         self.embedding_head = NormAwareEmbedding()
-        self.reid_loss = OIMLoss(256, num_pids, num_cq_size, oim_momentum, oim_scalar)
         self.faster_rcnn_predictor = faster_rcnn_predictor
         self.reid_head = reid_head
         # rename the method inherited from parent class
         self.postprocess_proposals = self.postprocess_detections
+
+        # PCB
+        self.parts = parts
+        self.avgpool = nn.AdaptiveAvgPool2d((self.parts, 1))
+        self.dropout = nn.Dropout(p=0.5)
+        for i in range(self.parts):
+            setattr(
+                self, f"reid_loss{i}", OIMLoss(256, num_pids, num_cq_size, oim_momentum, oim_scalar)
+            )
 
     def forward(self, features, proposals, image_shapes, targets=None, query_img_as_gallery=False):
         """
@@ -204,7 +244,7 @@ class SeqRoIHeads(RoIHeads):
         proposal_features = self.box_roi_pool(features, proposals, image_shapes)
         proposal_features = self.box_head(proposal_features)
         proposal_cls_scores, proposal_regs = self.faster_rcnn_predictor(
-            proposal_features["feat_res5"]
+            F.adaptive_max_pool2d(proposal_features["feat_res5"], 1)
         )
 
         if self.training:
@@ -228,7 +268,9 @@ class SeqRoIHeads(RoIHeads):
             gt_box = [targets[0]["boxes"]]
             gt_box_features = self.box_roi_pool(features, gt_box, image_shapes)
             gt_box_features = self.reid_head(gt_box_features)
-            embeddings, _ = self.embedding_head(gt_box_features)
+            embeddings, _ = pcb_forward(
+                self.embedding_head, gt_box_features, self.avgpool, self.dropout
+            )
             gt_det = {"boxes": targets[0]["boxes"], "embeddings": embeddings}
 
         # no detection predicted by Faster R-CNN head in test phase
@@ -244,25 +286,34 @@ class SeqRoIHeads(RoIHeads):
         box_features = self.box_roi_pool(features, boxes, image_shapes)
         box_features = self.reid_head(box_features)
         box_regs = self.box_predictor(box_features["feat_res5"])
-        box_embeddings, box_cls_scores = self.embedding_head(box_features)
-        if box_cls_scores.dim() == 0:
-            box_cls_scores = box_cls_scores.unsqueeze(0)
+        box_embeddings, box_cls_scores = pcb_forward(
+            self.embedding_head, box_features, self.avgpool, self.dropout
+        )
 
         result, losses = [], {}
         if self.training:
             proposal_labels = [y.clamp(0, 1) for y in proposal_pid_labels]
             box_labels = [y.clamp(0, 1) for y in box_pid_labels]
-            losses = detection_losses(
-                proposal_cls_scores,
-                proposal_regs,
-                proposal_labels,
-                proposal_reg_targets,
-                box_cls_scores,
-                box_regs,
-                box_labels,
-                box_reg_targets,
-            )
-            loss_box_reid = self.reid_loss(box_embeddings, box_pid_labels)
+            loss_box_reid = 0
+            for i in range(self.parts):
+                part_losses = detection_losses(
+                    proposal_cls_scores,
+                    proposal_regs,
+                    proposal_labels,
+                    proposal_reg_targets,
+                    box_cls_scores[:, i],
+                    box_regs,
+                    box_labels,
+                    box_reg_targets,
+                )
+                for k, v in part_losses.items():
+                    if k not in losses:
+                        losses[k] = v
+                    else:
+                        losses[k] += v
+                loss_box_reid += getattr(self, f"reid_loss{i}")(
+                    box_embeddings[:, i, :], box_pid_labels
+                )
             losses.update(loss_box_reid=loss_box_reid)
         else:
             # The IoUs of these boxes are higher than that of proposals,
@@ -334,7 +385,7 @@ class SeqRoIHeads(RoIHeads):
             pred_scores = torch.sigmoid(class_logits)
         if cws:
             # Confidence Weighted Similarity (CWS)
-            embeddings = embeddings * pred_scores.view(-1, 1)
+            embeddings = embeddings * pred_scores.view(-1, 1, 1).repeat(1, 6, 256)
 
         # split boxes and scores per image
         pred_boxes = pred_boxes.split(boxes_per_image, 0)
@@ -362,7 +413,7 @@ class SeqRoIHeads(RoIHeads):
             boxes = boxes.reshape(-1, 4)
             scores = scores.flatten()
             labels = labels.flatten()
-            embeddings = embeddings.reshape(-1, self.embedding_head.dim)
+            embeddings = embeddings.reshape(-1, self.parts, self.embedding_head.dim)
 
             # remove low scoring boxes
             inds = torch.nonzero(scores > self.score_thresh).squeeze(1)
