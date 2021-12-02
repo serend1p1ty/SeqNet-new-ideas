@@ -47,7 +47,7 @@ def main(args):
     set_random_seed(cfg.SEED)
 
     logger.info("Creating model")
-    model = SeqNet(cfg, only_res5=args.only_res5)
+    model = SeqNet(cfg, only_res5=args.only_res5, dropout=args.dropout)
     model.to(device)
 
     logger.info("Loading data")
@@ -112,6 +112,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--work-dir", type=str, default="", help="Path of the working directory")
     parser.add_argument("--only_res5", action="store_true")
+    parser.add_argument("--dropout", type=float, default=0.5)
     parser.add_argument(
         "opts", nargs=argparse.REMAINDER, help="Modify config options using the command-line"
     )

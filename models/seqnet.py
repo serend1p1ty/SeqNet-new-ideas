@@ -42,7 +42,7 @@ def pcb_forward(nae_head, box_features, avgpool, dropout, parts=6):
 
 
 class SeqNet(nn.Module):
-    def __init__(self, cfg, only_res5=False):
+    def __init__(self, cfg, only_res5=False, dropout=0.5):
         super(SeqNet, self).__init__()
 
         backbone, box_head = build_resnet(name="resnet50", pretrained=True)
@@ -80,6 +80,7 @@ class SeqNet(nn.Module):
         box_predictor = BBoxRegressor(2048, num_classes=2, bn_neck=cfg.MODEL.ROI_HEAD.BN_NECK)
         roi_heads = SeqRoIHeads(
             only_res5=only_res5,
+            dropout=dropout,
             # OIM
             num_pids=cfg.MODEL.LOSS.LUT_SIZE,
             num_cq_size=cfg.MODEL.LOSS.CQ_SIZE,
@@ -210,6 +211,7 @@ class SeqRoIHeads(RoIHeads):
         reid_head,
         parts=6,
         only_res5=False,
+        dropout=0.5,
         *args,
         **kwargs,
     ):
@@ -229,7 +231,7 @@ class SeqRoIHeads(RoIHeads):
         # PCB
         self.parts = parts
         self.avgpool = nn.AdaptiveAvgPool2d((self.parts, 1))
-        self.dropout = nn.Dropout(p=0.5)
+        self.dropout = nn.Dropout(p=dropout)
         for i in range(self.parts):
             setattr(
                 self, f"reid_loss{i}", OIMLoss(256, num_pids, num_cq_size, oim_momentum, oim_scalar)
