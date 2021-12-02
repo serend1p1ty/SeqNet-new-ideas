@@ -42,7 +42,7 @@ def pcb_forward(nae_head, box_features, avgpool, dropout, parts=6):
 
 
 class SeqNet(nn.Module):
-    def __init__(self, cfg):
+    def __init__(self, cfg, only_res5=False):
         super(SeqNet, self).__init__()
 
         backbone, box_head = build_resnet(name="resnet50", pretrained=True)
@@ -79,6 +79,7 @@ class SeqNet(nn.Module):
         )
         box_predictor = BBoxRegressor(2048, num_classes=2, bn_neck=cfg.MODEL.ROI_HEAD.BN_NECK)
         roi_heads = SeqRoIHeads(
+            only_res5=only_res5,
             # OIM
             num_pids=cfg.MODEL.LOSS.LUT_SIZE,
             num_cq_size=cfg.MODEL.LOSS.CQ_SIZE,
@@ -208,11 +209,18 @@ class SeqRoIHeads(RoIHeads):
         faster_rcnn_predictor,
         reid_head,
         parts=6,
+        only_res5=False,
         *args,
         **kwargs,
     ):
         super(SeqRoIHeads, self).__init__(*args, **kwargs)
-        self.embedding_head = NormAwareEmbedding()
+        if only_res5:
+            featmap_names = ["feat_res5"]
+            in_channels = [2048]
+        else:
+            featmap_names = ["feat_res4", "feat_res5"]
+            in_channels = [1024, 2048]
+        self.embedding_head = NormAwareEmbedding(featmap_names, in_channels)
         self.faster_rcnn_predictor = faster_rcnn_predictor
         self.reid_head = reid_head
         # rename the method inherited from parent class
@@ -492,7 +500,7 @@ class NormAwareEmbedding(nn.Module):
             tensor of size (BatchSize, dim), L2 normalized embeddings.
             tensor of size (BatchSize, ) rescaled norm of embeddings, as class_logits.
         """
-        assert len(featmaps) == len(self.featmap_names)
+        # assert len(featmaps) == len(self.featmap_names)
         if len(featmaps) == 1:
             k, v = featmaps.items()[0]
             v = self._flatten_fc_input(v)
@@ -504,6 +512,8 @@ class NormAwareEmbedding(nn.Module):
         else:
             outputs = []
             for k, v in featmaps.items():
+                if k not in self.featmap_names:
+                    continue
                 v = self._flatten_fc_input(v)
                 outputs.append(self.projectors[k](v))
             embeddings = torch.cat(outputs, dim=1)
