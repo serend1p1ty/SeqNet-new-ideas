@@ -52,9 +52,8 @@ def main(args):
         train_loader,
         args.max_epochs,
         args.output_dir,
-        warmup_method="linear",
-        warmup_iters=len(train_loader) - 1,
-        warmup_factor=0.001,
+        warmup_t=len(train_loader) - 1,
+        warmup_init_lr=0.000003,
         clip_grad_norm=args.clip_grad,
         enable_amp=args.enable_amp,
     )

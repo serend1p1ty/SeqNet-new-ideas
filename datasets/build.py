@@ -1,6 +1,7 @@
 import logging
 
 import torch
+from tabulate import tabulate
 
 from utils.transforms import build_transforms
 
